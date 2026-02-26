@@ -272,19 +272,19 @@ loginBtn.onclick = async () => {
 
   if(error){ loginStatus.textContent = "❌ " + error.message; return; }
 
-  loginStatus.textContent = "✅ OK";
+   loginStatus.textContent = "✅ OK";
   loginCard.classList.add("hidden");
   dashCard.classList.remove("hidden");
   userBadge.textContent = data.user.email;
 
-  await cargarTodo();
 };
 
 logoutBtn.onclick = async () => {
   await sb.auth.signOut();
+  location.reload(); // vuelve al login
 };
-
 sb.auth.onAuthStateChange(async (event, session) => {
+  console.log("AUTH EVENT:", event, "session?", !!session);
   if(session?.user){
     loginCard.classList.add("hidden");
     dashCard.classList.remove("hidden");
@@ -295,7 +295,6 @@ sb.auth.onAuthStateChange(async (event, session) => {
     loginCard.classList.remove("hidden");
   }
 });
-
 /* ================= DATA LOAD ================= */
 /**
  * Lee TODAS las certificaciones (employee_certifications)
@@ -325,31 +324,24 @@ async function cargarTodo(){
 
   // 2) Tabla (desde la vista FIX que ya trae area)
   //    Si NO creaste la vista FIX, cambia el nombre por "v_employee_client_cert_status"
-  const { data, error } = await sb
-    .from("v_employee_client_cert_status_fix")
-    .select(`
-      employee_id,
-      documento,
-      nombre,
-      cargo,
-      area,
-      cliente,
-      fecha_inicio,
-      fecha_vencimiento,
-      observacion,
-      estado_calc,
-      dias_para_vencer,
-      updated_at
-    `)
-    .eq("cliente", "CLARO")
-    .order("fecha_vencimiento", { ascending: true });
+const { data, error } = await sb
+  .rpc("rpc_employee_client_cert_status", { p_cliente: "CLARO" });
 
-  if(error){
-    console.error("DATA ERROR:", error);
-    status.textContent = "❌ Error: " + error.message;
-    return;
-  }
+if(error){
+  console.error("DATA ERROR:", error);
+  status.textContent = "❌ Error cargando datos: " + (error.message || "Sin mensaje");
+  alert(
+    "Error cargando datos:\n" +
+    "message: " + (error.message || "") + "\n" +
+    "details: " + (error.details || "") + "\n" +
+    "hint: " + (error.hint || "") + "\n" +
+    "code: " + (error.code || "")
+  );
+  return;
+}
 
+console.log("RPC data length:", (data || []).length);
+status.textContent = "RPC OK. Registros: " + ((data || []).length);
   // 3) Construir RAW para filtros/render
   RAW = (data || []).map(r => {
     const key = String(r.estado_calc || "").toUpperCase();
