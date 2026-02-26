@@ -151,7 +151,12 @@ hr{border:none;border-top:1px solid rgba(167,139,250,.18);margin:14px 0}
           <option value="SIN_FECHA">Sin fecha</option>
         </select>
       </div>
-
+<div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Área</div>
+  <select id="areaSel">
+    <option value="TODAS">Todas</option>
+  </select>
+</div>
       <div style="flex:1;min-width:260px">
         <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Buscar (documento / nombre / cargo / certificación)</div>
         <input id="q" placeholder="Ej: 1030 / Nicolas / Técnico / Certificación – ..." style="width:100%">
@@ -183,6 +188,7 @@ hr{border:none;border-top:1px solid rgba(167,139,250,.18);margin:14px 0}
             <th>Documento</th>
             <th>Nombre</th>
             <th>Cargo</th>
+            <th>Área</th>
             <th>Certificación</th>
             <th>Desde</th>
             <th>Vence</th>
@@ -221,6 +227,7 @@ const kVenc = document.getElementById("kVenc");
 const kTot = document.getElementById("kTot");
 
 const estadoSel = document.getElementById("estadoSel");
+  const areaSel = document.getElementById("areaSel");
 const proxSel = document.getElementById("proxSel");
 const q = document.getElementById("q");
 const refBtn = document.getElementById("refBtn");
@@ -295,65 +302,133 @@ sb.auth.onAuthStateChange(async (event, session) => {
  * y trae datos del empleado desde employees (relación por employee_id).
  */
 async function cargarTodo(){
-  status.textContent = "Cargando certificaciones...";
+  status.textContent = "Cargando certificaciones (CLARO)...";
   tbody.innerHTML = "";
   RAW = [];
 
-  // Trae todo (si tienes muchos registros, luego hacemos paginación)
+  // 1) KPIs reales (desde la vista v_kpi_client_cert)
+  const { data: kpiData, error: kpiErr } = await sb
+    .from("v_kpi_client_cert")
+    .select("total_registros, vigentes, por_vencer_30, vencidas")
+    .eq("cliente", "CLARO")
+    .single();
+
+  if(kpiErr){
+    console.error("KPI ERROR:", kpiErr);
+    // No detenemos el dashboard por KPIs; solo avisamos
+  } else {
+    kTot.textContent = kpiData.total_registros ?? "—";
+    kVig.textContent = kpiData.vigentes ?? "—";
+    kPorV.textContent = kpiData.por_vencer_30 ?? "—";
+    kVenc.textContent = kpiData.vencidas ?? "—";
+  }
+
+  // 2) Tabla (desde la vista FIX que ya trae area)
+  //    Si NO creaste la vista FIX, cambia el nombre por "v_employee_client_cert_status"
   const { data, error } = await sb
-    .from("employee_certifications")
+    .from("v_employee_client_cert_status_fix")
     .select(`
       employee_id,
-      certificacion,
-      vigencia_desde,
-      vigencia_hasta,
-      updated_at,
-      employees (
-        documento,
-        nombre,
-        cargo
-      )
+      documento,
+      nombre,
+      cargo,
+      area,
+      cliente,
+      fecha_inicio,
+      fecha_vencimiento,
+      observacion,
+      estado_calc,
+      dias_para_vencer,
+      updated_at
     `)
-    .order("vigencia_hasta", { ascending: true });
+    .eq("cliente", "CLARO")
+    .order("fecha_vencimiento", { ascending: true });
 
   if(error){
+    console.error("DATA ERROR:", error);
     status.textContent = "❌ Error: " + error.message;
     return;
   }
 
+  // 3) Construir RAW para filtros/render
   RAW = (data || []).map(r => {
-    const emp = r.employees || {};
-    const est = calcEstado(r.vigencia_hasta);
+    const key = String(r.estado_calc || "").toUpperCase();
+
+    const estado_key =
+      key.includes("VENC") ? "VENCIDO" :
+      key.includes("POR") ? "POR_VENCER" :
+      key.includes("VIG") ? "VIGENTE" :
+      "SIN_FECHA";
+
+    const estado_label =
+      (estado_key === "VIGENTE") ? "Vigente" :
+      (estado_key === "POR_VENCER") ? "Por vencer" :
+      (estado_key === "VENCIDO") ? "Vencido" :
+      "Sin fecha";
+
+    const estado_cls =
+      (estado_key === "VIGENTE") ? "b-ok" :
+      (estado_key === "POR_VENCER") ? "b-warn" :
+      (estado_key === "VENCIDO") ? "b-bad" :
+      "b-info";
+
     return {
-      documento: emp.documento || "",
-      nombre: emp.nombre || "",
-      cargo: emp.cargo || "",
-      certificacion: r.certificacion || "",
-      vigencia_desde: iso(r.vigencia_desde),
-      vigencia_hasta: iso(r.vigencia_hasta),
-      dias: est.dias,
-      estado_key: est.key,
-      estado_label: est.label,
-      estado_cls: est.cls
+      documento: r.documento || "",
+      nombre: r.nombre || "",
+      cargo: r.cargo || "",
+      area: r.area || "",                     // 👈 IMPORTANTE: guardamos el área
+      certificacion: r.observacion || "",      // aquí estás mostrando "observacion"
+      vigencia_desde: iso(r.fecha_inicio),
+      vigencia_hasta: iso(r.fecha_vencimiento),
+      dias: (r.dias_para_vencer === null || r.dias_para_vencer === undefined) ? "—" : String(r.dias_para_vencer),
+      estado_key,
+      estado_label,
+      estado_cls
     };
   });
 
+  // 4) Llenar combo de áreas (dinámico)
+  llenarAreas();
+
+  // 5) Aplicar filtros y render
   aplicarFiltros();
   status.textContent = "Listo.";
 }
+function llenarAreas(){
+  // conservar lo que el usuario ya tenía seleccionado
+  const prev = areaSel.value || "TODAS";
 
+  // obtener áreas únicas desde RAW
+  const set = new Set();
+  for(const r of RAW){
+    const a = (r.area || "").trim();
+    if(a) set.add(a);
+  }
+
+  const areas = Array.from(set).sort((a,b)=>a.localeCompare(b,"es"));
+
+  // pintar options
+  areaSel.innerHTML = `<option value="TODAS">Todas</option>` +
+    areas.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join("");
+
+  // restaurar selección si existe
+  if(areas.includes(prev)) areaSel.value = prev;
+  else areaSel.value = "TODAS";
+}
 /* ================= FILTER + RENDER ================= */
 function aplicarFiltros(){
   const est = estadoSel.value;
   const prox = Number(proxSel.value || "0");
   const qq = q.value.trim().toLowerCase();
-
+const area = areaSel.value;
   let rows = RAW.slice();
 
   if(est !== "TODOS"){
     rows = rows.filter(r => r.estado_key === est);
   }
-
+if(area !== "TODAS"){
+  rows = rows.filter(r => (r.area || "").trim() === area);
+}
   if(prox > 0){
     rows = rows.filter(r => {
       const d = (r.dias === "—") ? null : Number(r.dias);
@@ -363,7 +438,7 @@ function aplicarFiltros(){
 
   if(qq){
     rows = rows.filter(r => {
-      const blob = (r.documento+" "+r.nombre+" "+r.cargo+" "+r.certificacion).toLowerCase();
+      const blob = (r.documento+" "+r.nombre+" "+r.cargo+" "+r.area+" "+r.certificacion).toLowerCase();
       return blob.includes(qq);
     });
   }
@@ -381,7 +456,7 @@ function aplicarFiltros(){
 
   // render
   tbody.innerHTML = rows.length ? "" : `
-    <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:18px">
+    <tr><td colspan="9" style="text-align:center;color:var(--muted);padding:18px">
       Sin resultados con los filtros actuales.
     </td></tr>
   `;
@@ -392,6 +467,7 @@ function aplicarFiltros(){
         <td>${esc(r.documento)}</td>
         <td>${esc(r.nombre)}</td>
         <td>${esc(r.cargo)}</td>
+        <td>${esc(r.area)}</td>
         <td>${esc(r.certificacion)}</td>
         <td><small>${esc(r.vigencia_desde || "—")}</small></td>
         <td><small>${esc(r.vigencia_hasta || "—")}</small></td>
@@ -405,6 +481,7 @@ function aplicarFiltros(){
 }
 
 estadoSel.onchange = aplicarFiltros;
+  areaSel.onchange = aplicarFiltros;
 proxSel.onchange = aplicarFiltros;
 q.oninput = () => { aplicarFiltros(); };
 
@@ -416,9 +493,11 @@ csvBtn.onclick = () => {
   const est = estadoSel.value;
   const prox = Number(proxSel.value || "0");
   const qq = q.value.trim().toLowerCase();
+  const area = areaSel.value;
 
   let rows = RAW.slice();
   if(est !== "TODOS") rows = rows.filter(r => r.estado_key === est);
+  if(area !== "TODAS") rows = rows.filter(r => (r.area || "").trim() === area);
   if(prox > 0){
     rows = rows.filter(r => {
       const d = (r.dias === "—") ? null : Number(r.dias);
@@ -426,28 +505,40 @@ csvBtn.onclick = () => {
     });
   }
   if(qq){
-    rows = rows.filter(r => (r.documento+" "+r.nombre+" "+r.cargo+" "+r.certificacion).toLowerCase().includes(qq));
-  }
+  rows = rows.filter(r =>
+    (r.documento+" "+r.nombre+" "+r.cargo+" "+r.area+" "+r.certificacion)
+      .toLowerCase()
+      .includes(qq)
+  );
+}
 
-  const header = ["documento","nombre","cargo","certificacion","vigencia_desde","vigencia_hasta","dias","estado"];
+// ✅ ALERT GENERAL (sirve con o sin búsqueda)
+if(rows.length === 0){
+  alert("No hay registros con esos filtros para exportar.");
+  return;
+}
+
+  const header = ["documento","nombre","cargo","area","certificacion","vigencia_desde","vigencia_hasta","dias","estado"];
   const lines = [header.join(",")];
 
-  for(const r of rows){
-    const line = [
-      r.documento, r.nombre, r.cargo, r.certificacion,
-      r.vigencia_desde, r.vigencia_hasta, r.dias, r.estado_label
-    ].map(x => `"${String(x ?? "").replaceAll('"','""')}"`).join(",");
-    lines.push(line);
-  }
+ for(const r of rows){
+  const line = [
+    r.documento, r.nombre, r.cargo, r.area, r.certificacion,
+    r.vigencia_desde, r.vigencia_hasta, r.dias, r.estado_label
+  ].map(x => `"${String(x ?? "").replaceAll('"','""')}"`).join(",");
 
-  const blob = new Blob([lines.join("\n")], { type:"text/csv;charset=utf-8" });
+  lines.push(line);
+}
+    const blob = new Blob([lines.join("\n")], { type:"text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
+
   const a = document.createElement("a");
   a.href = url;
-  a.download = "recertificaciones_claro.csv";
+  a.download = "recertificaciones_claro.csv";  
   document.body.appendChild(a);
   a.click();
   a.remove();
+
   URL.revokeObjectURL(url);
 };
 </script>
