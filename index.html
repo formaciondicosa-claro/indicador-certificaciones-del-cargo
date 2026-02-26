@@ -272,24 +272,31 @@ loginBtn.onclick = async () => {
 
   if(error){ loginStatus.textContent = "❌ " + error.message; return; }
 
-   loginStatus.textContent = "✅ OK";
+  loginStatus.textContent = "✅ OK";
   loginCard.classList.add("hidden");
   dashCard.classList.remove("hidden");
   userBadge.textContent = data.user.email;
 
+  // ✅ CARGA SIEMPRE AQUÍ (para que no quede en 0/0)
+  await cargarTodo();
 };
-
 logoutBtn.onclick = async () => {
   await sb.auth.signOut();
   location.reload(); // vuelve al login
 };
 sb.auth.onAuthStateChange(async (event, session) => {
   console.log("AUTH EVENT:", event, "session?", !!session);
+
   if(session?.user){
     loginCard.classList.add("hidden");
     dashCard.classList.remove("hidden");
     userBadge.textContent = session.user.email;
-    await cargarTodo();
+
+    // ✅ SOLO cuando la página carga y ya había sesión guardada
+    if(event === "INITIAL_SESSION"){
+      await cargarTodo();
+    }
+
   }else{
     dashCard.classList.add("hidden");
     loginCard.classList.remove("hidden");
