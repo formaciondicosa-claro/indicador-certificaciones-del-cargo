@@ -461,34 +461,7 @@ RAW = (data || []).map(r => {
   };
 });
 
-  const estado_label =
-    (estado_key === "VIGENTE") ? "Vigente" :
-    (estado_key === "POR_VENCER") ? "Por vencer" :
-    (estado_key === "VENCIDO") ? "Vencido" :
-    (estado_key === "PENDIENTE") ? "Pendiente" :
-    (estado_key === "NO_ENCONTRADO") ? "No encontrado" :
-    "Sin fecha";
-
-  const estado_cls =
-    (estado_key === "VIGENTE") ? "b-ok" :
-    (estado_key === "POR_VENCER") ? "b-warn" :
-    (estado_key === "VENCIDO") ? "b-bad" :
-    "b-info";
-
-  return {
-    documento: r.documento || "",
-    nombre: r.nombre || "",
-    cargo: r.cargo || "",
-    area: r.area || "",
-    certificacion: r.observacion || "",
-    vigencia_desde: iso(r.fecha_inicio),
-    vigencia_hasta: iso(r.fecha_vencimiento),
-    dias: (dnum === null) ? "—" : String(dnum),
-    estado_key,
-    estado_label,
-    estado_cls
-  };
-});
+  
   // 4) Llenar combo de áreas (dinámico)
   llenarAreas();
 
