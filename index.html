@@ -375,27 +375,91 @@ console.log("RPC data length:", (data || []).length);
 status.textContent = "RPC OK. Registros: " + ((data || []).length);
   // 3) Construir RAW para filtros/render
 RAW = (data || []).map(r => {
-
-  // 1) Dias como número
-  const dnum = (r.dias_para_vencer === null || r.dias_para_vencer === undefined)
-    ? null
-    : Number(r.dias_para_vencer);
-
-  // 2) Respetar lo que viene del RPC (estado_calc)
   const key = String(r.estado_calc || "").toUpperCase();
 
+  // ✅ 1) Estados especiales que vienen del RPC (los respetamos)
+  if (key.includes("PEND")) {
+    return {
+      documento: r.documento || "",
+      nombre: r.nombre || "",
+      cargo: r.cargo || "",
+      area: r.area || "",
+      certificacion: r.observacion || "",
+      vigencia_desde: iso(r.fecha_inicio),
+      vigencia_hasta: iso(r.fecha_vencimiento),
+      dias: "—",
+      estado_key: "PENDIENTE",
+      estado_label: "Pendiente",
+      estado_cls: "b-info"
+    };
+  }
+
+  if (key.includes("NO_ENCONTR")) {
+    return {
+      documento: r.documento || "",
+      nombre: r.nombre || "",
+      cargo: r.cargo || "",
+      area: r.area || "",
+      certificacion: r.observacion || "",
+      vigencia_desde: iso(r.fecha_inicio),
+      vigencia_hasta: iso(r.fecha_vencimiento),
+      dias: "—",
+      estado_key: "NO_ENCONTRADO",
+      estado_label: "No encontrado",
+      estado_cls: "b-info"
+    };
+  }
+
+  // ✅ 2) Si no hay fecha de vencimiento => SIN_FECHA (Pendiente)
+  const venceISO = iso(r.fecha_vencimiento);
+  if (!venceISO) {
+    return {
+      documento: r.documento || "",
+      nombre: r.nombre || "",
+      cargo: r.cargo || "",
+      area: r.area || "",
+      certificacion: r.observacion || "",
+      vigencia_desde: iso(r.fecha_inicio),
+      vigencia_hasta: "",
+      dias: "—",
+      estado_key: "SIN_FECHA",
+      estado_label: "Sin fecha",
+      estado_cls: "b-info"
+    };
+  }
+
+  // ✅ 3) Calcular días con la fecha REAL (aquí nace el POR_VENCER)
+  const daysLeft = daysBetweenToday(venceISO);
+
   const estado_key =
-    key.includes("PEND") ? "PENDIENTE" :
-    key.includes("NO_ENCONTR") ? "NO_ENCONTRADO" :
-    key.includes("SIN_FECHA") ? "SIN_FECHA" :
-    key.includes("VENC") ? "VENCIDO" :
-    key.includes("POR") ? "POR_VENCER" :
-    key.includes("VIG") ? "VIGENTE" :
-    // fallback si no viene estado_calc
-    (dnum === null) ? "SIN_FECHA" :
-    (dnum < 0) ? "VENCIDO" :
-    (dnum <= 30) ? "POR_VENCER" :
+    (daysLeft < 0) ? "VENCIDO" :
+    (daysLeft <= 30) ? "POR_VENCER" :
     "VIGENTE";
+
+  const estado_label =
+    (estado_key === "VIGENTE") ? "Vigente" :
+    (estado_key === "POR_VENCER") ? "Por vencer" :
+    "Vencido";
+
+  const estado_cls =
+    (estado_key === "VIGENTE") ? "b-ok" :
+    (estado_key === "POR_VENCER") ? "b-warn" :
+    "b-bad";
+
+  return {
+    documento: r.documento || "",
+    nombre: r.nombre || "",
+    cargo: r.cargo || "",
+    area: r.area || "",
+    certificacion: r.observacion || "",
+    vigencia_desde: iso(r.fecha_inicio),
+    vigencia_hasta: venceISO,
+    dias: String(daysLeft),
+    estado_key,
+    estado_label,
+    estado_cls
+  };
+});
 
   const estado_label =
     (estado_key === "VIGENTE") ? "Vigente" :
